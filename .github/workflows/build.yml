@@ -1,0 +1,86 @@
+name: Build Rule Sets
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sing-box
+        run: |
+          curl -Lo sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.13.6/sing-box-1.13.6-linux-amd64.tar.gz
+          tar xzf sing-box.tar.gz
+          mv sing-box-*/sing-box /usr/local/bin/
+
+      - name: Fetch upstream sources
+        run: |
+          mkdir -p sources
+          curl -Lo sources/felixonmars.conf https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf
+          curl -Lo sources/v2fly-cn.txt https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/cn
+          curl -Lo sources/loyalsoldier-direct.txt https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/direct-list.txt
+          curl -Lo sources/loyalsoldier-china.txt https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/china-list.txt
+
+      - name: Merge and compile
+        run: |
+          python3 << 'EOF'
+          import re, os
+
+          domains = set()
+          for fname in os.listdir("sources"):
+              with open(f"sources/{fname}", encoding="utf-8", errors="ignore") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line or line.startswith("#") or line.startswith("!"):
+                          continue
+                      m = re.match(r"server=/([^/]+)/", line)
+                      if m:
+                          domains.add(m.group(1).lower()); continue
+                      m = re.match(r"(?:DOMAIN-SUFFIX|DOMAIN),\s*([^\s,]+)", line)
+                      if m:
+                          domains.add(m.group(1).lower()); continue
+                      if line.startswith(("include:", "regexp:")):
+                          continue
+                      cleaned = re.split(r"\s+@", line)[0].strip()
+                      cleaned = re.sub(r"^(full:|domain:|keyword:)", "", cleaned)
+                      if re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]*\.)+[a-zA-Z]{2,}$", cleaned):
+                          domains.add(cleaned.lower())
+
+          # 加载自定义追加/排除
+          for name, target in [("custom-include.txt", True), ("custom-exclude.txt", False)]:
+              if os.path.exists(name):
+                  with open(name) as f:
+                      for line in f:
+                          d = line.strip().lower()
+                          if d and not d.startswith("#"):
+                              if target:
+                                  domains.add(d)
+                              else:
+                                  domains.discard(d)
+
+          sorted_d = sorted(domains)
+          with open("geosite-cn.json", "w") as f:
+              f.write('{\n  "version": 1,\n  "rules": [\n    {\n      "domain_suffix": [\n')
+              for i, d in enumerate(sorted_d):
+                  comma = "," if i < len(sorted_d) - 1 else ""
+                  f.write(f'        "{d}"{comma}\n')
+              f.write('      ]\n    }\n  ]\n}\n')
+          print(f"Total: {len(sorted_d)} domains")
+          EOF
+
+      - name: Compile to srs
+        run: |
+          mkdir -p rule-set
+          sing-box rule-set compile geosite-cn.json -o rule-set/geosite-cn.srs
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          files: rule-set/geosite-cn.srs
