@@ -27,7 +27,6 @@ jobs:
           curl -Lo sources/felixonmars.conf https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf
           curl -Lo sources/v2fly-cn.txt https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/cn
           curl -Lo sources/loyalsoldier-direct.txt https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/direct-list.txt
-          curl -Lo sources/loyalsoldier-china.txt https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/china-list.txt
 
       - name: Merge and compile
         run: |
